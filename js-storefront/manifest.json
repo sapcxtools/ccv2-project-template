@@ -1,0 +1,16 @@
+{
+    "applications": [
+        {
+            "name": "demo",
+            "path": "demo",
+            "ssr": {
+                "enabled": true,
+                "path": "dist/demo/server/main.js"
+            },
+            "csr": {
+                "webroot": "dist/demo/browser/"
+            }
+        }
+    ],
+    "nodeVersion": "22"
+}
