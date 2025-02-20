@@ -1,2 +1,21 @@
-# Node Environment
-.node-version
+# Node
+node_modules/
+.npmrc
+npm-debug.log
+
+# Angular
+/.angular/cache
+
+# Miscellaneous
+.sass-cache/
+/connect.lock
+/coverage
+/libpeerconnection.log
+testem.log
+/typings
+
+# Compiled output
+/dist
+/tmp
+/out-tsc
+/bazel-out

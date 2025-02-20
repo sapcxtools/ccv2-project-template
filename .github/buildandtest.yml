@@ -1,0 +1,107 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "core-customize/hybris/bin/custom/project/**/*.java"
+      - "core-customize/hybris/bin/custom/project/**/*-beans.xml"
+      - "core-customize/hybris/bin/custom/project/**/*-items.xml"
+      - "core-customize/hybris/bin/custom/project/**/extensioninfo.xml"
+      - "core-customize/hybris/bin/custom/project/**/external-dependencies.xml"
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: "0 15 * * 0,3"
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "adopt"
+          java-version: "17"
+          cache: "gradle"
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v3
+      - name: Set up cache for SAP artifacts
+        uses: actions/cache@v4
+        with:
+          key: sap-artifacts-cache-${{ hashFiles('core-customize/manifest.json') }}
+          path: dependencies
+      - name: SAP download config
+        env:
+          SAPCX_ARTEFACT_BASEURL: ${{ secrets.SAPCX_ARTEFACT_BASEURL }}
+          SAPCX_ARTEFACT_USER: ${{ secrets.SAPCX_ARTEFACT_USER }}
+          SAPCX_ARTEFACT_PASSWORD: ${{ secrets.SAPCX_ARTEFACT_PASSWORD }}
+        shell: bash
+        run: |
+          mkdir -p ${HOME}/.gradle
+          echo "GRADLE_USER_HOME=${HOME}/.gradle" >> $GITHUB_ENV
+          echo "SAPCX_ARTEFACT_BASEURL=${SAPCX_ARTEFACT_BASEURL}" >> ${HOME}/.gradle/gradle.properties
+          echo "SAPCX_ARTEFACT_USER=${SAPCX_ARTEFACT_USER}" >> ${HOME}/.gradle/gradle.properties
+          echo "SAPCX_ARTEFACT_PASSWORD=${SAPCX_ARTEFACT_PASSWORD}" >> ${HOME}/.gradle/gradle.properties
+      - name: SAP Commerce environment
+        run: |
+          echo "HYBRIS_OPT_CONFIG_DIR=$GITHUB_WORKSPACE/core-customize/hybris/config/local-config" >> $GITHUB_ENV
+          echo "HYBRIS_BIN_DIR=$GITHUB_WORKSPACE/core-customize/hybris/bin" >> $GITHUB_ENV
+          echo "HYBRIS_CONF_DIR=$GITHUB_WORKSPACE/core-customize/hybris/config" >> $GITHUB_ENV
+          echo "HYBRIS_LOG_DIR=$GITHUB_WORKSPACE/core-customize/hybris/log" >> $GITHUB_ENV
+      - name: Bootstrap platform
+        run: ./gradlew setupLocalDevelopment
+      - name: Build platform
+        run: ./gradlew yall
+      - name: Run unit tests
+        run: |
+          cat $GITHUB_WORKSPACE/ci/config/testing-unit.properties > $HYBRIS_CONF_DIR/local-config/99-local.properties
+          ./gradlew yunittests
+
+          # Target never fails, therefore, check for test errors and fail if errors were found
+          for file in $HYBRIS_LOG_DIR/junit/test-results/unit/*.xml; do if [ "$(grep -cE '<(error|failure)' "${file}")" -gt 0 ]; then exit 1; fi; done
+
+          if [ ! -f "$HYBRIS_LOG_DIR/junit/jacoco-unit.exec" ]; then
+            mkdir -p "$HYBRIS_LOG_DIR/junit"
+            touch "$HYBRIS_LOG_DIR/junit/jacoco-unit.exec"
+          fi
+      - name: Run integration tests
+        run: |
+          cat $GITHUB_WORKSPACE/ci/config/testing-integration.properties > $HYBRIS_CONF_DIR/local-config/99-local.properties
+          ./gradlew yintegrationtests
+
+          # Target never fails, therefore, check for test errors and fail if errors were found
+          for file in $HYBRIS_LOG_DIR/junit/test-results/integration/*.xml; do if [ "$(grep -cE '<(error|failure)' "${file}")" -gt 0 ]; then exit 1; fi; done
+
+          if [ ! -f "$HYBRIS_LOG_DIR/junit/jacoco-integration.exec" ]; then
+            mkdir -p "$HYBRIS_LOG_DIR/junit"
+            touch "$HYBRIS_LOG_DIR/junit/jacoco-integration.exec"
+          fi
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: Coverage Report
+        env:
+          TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          # Generate codecov report 
+          mkdir -p "$HYBRIS_BIN_DIR/custom"
+          java -jar $GITHUB_WORKSPACE/ci/lib/jacococli.jar merge $HYBRIS_LOG_DIR/junit/jacoco-unit.exec $HYBRIS_LOG_DIR/junit/jacoco-integration.exec --destfile $HYBRIS_LOG_DIR/junit/jacoco.exec
+          java -jar $GITHUB_WORKSPACE/ci/lib/jacococli.jar report $HYBRIS_LOG_DIR/junit/jacoco.exec --classfiles $HYBRIS_BIN_DIR/custom --sourcefiles $HYBRIS_BIN_DIR/custom --xml $HYBRIS_LOG_DIR/junit/jacoco.xml
+
+          # Download codecov uploader
+          curl -Os https://uploader.codecov.io/latest/linux/codecov
+          chmod +x codecov
+
+          # Upload report to codecov
+          if [ $GITHUB_REF_TYPE -eq "branch" ]; then
+            ./codecov -f $HYBRIS_LOG_DIR/junit/jacoco.xml -Z --build $GITHUB_RUN_ID --branch GITHUB_REF_NAME -t $TOKEN
+          else
+            ./codecov -f $HYBRIS_LOG_DIR/junit/jacoco.xml -Z --build $GITHUB_RUN_ID --tag GITHUB_REF_NAME -t $TOKEN
+          fi

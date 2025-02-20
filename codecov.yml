@@ -1,0 +1,4 @@
+ignore:
+  - "core-customize/hybris/bin/custom/project/**/backoffice/src/**/*"
+  - "core-customize/hybris/bin/custom/project/**/gensrc/**/*"
+  - "core-customize/hybris/bin/custom/project/**/testsrc/**/*"

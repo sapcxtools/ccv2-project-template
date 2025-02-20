@@ -24,28 +24,17 @@ if [ -z "$NAME" ]; then
     exit 1
 fi
 
-# https://sap.github.io/spartacus-docs/building-the-spartacus-storefront-from-libraries-4-x/
-# yarn global add @angular/cli@latest
-
-if ! command -v 'yarn' > /dev/null 2>&1
-then
-    error "yarn not found"
-    error "please install it to continue"
-    error "https://classic.yarnpkg.com/en/docs/install"
-    exit 1
-fi
-
 if ! command -v 'ng' > /dev/null 2>&1
 then
     error "Angular CLI (ng) not found"
     error "please install @angular/cli@latest"
-    error "> yarn global add @angular/cli@latest"
+    error "> npm install -g @angular/cli@latest"
     exit 1
 fi
 
 NG_VERSION="$(ng version | grep '@angular-devkit/core' | awk '{ print $2 }')"
-if case $NG_VERSION in 12.*) false;; *) true;; esac; then
-    error "Wrong angular version, please use Angular 12 (latest) (@angular/cli@latest)"
+if case $NG_VERSION in 19.*) false;; *) true;; esac; then
+    error "Wrong angular version, please use Angular 19 (latest) (@angular/cli@latest)"
     exit 1
 fi
 
@@ -55,13 +44,21 @@ ng new "$NAME" \
   --skip-git \
   --style=scss \
   --routing=false \
-  --packageManager=yarn
+  --standalone=false
 (
     cd "$NAME" || exit 1
+
+    progress "Adding Composable Storefront repository to npm runtime configuration"
+cat > .npmrc <<-EOF
+@spartacus:registry=https://73554900100900004337.npmsrv.base.repositories.cloud.sap/
+//73554900100900004337.npmsrv.base.repositories.cloud.sap/:_auth=MDAwMTg3OTI3MC1jeGRlbW86QWZod2hOZThpSEpNZXRsdTB5T0FadzVnNUh0QkRLOEs=
+always-auth=true
+EOF
+
     progress "Adding Spartacus (PWA and SSR enabled)"
     echo "> Recommended minimal features: Cart, Product, SmartEdit"
     echo "> Just confirm the empty defaults for SmartEdit preview route and allow origin"
-    ng add @spartacus/schematics@latest \
+    ng add @spartacus/schematics@2211.36.1 \
       --pwa \
       --ssr \
       --use-meta-tags
@@ -78,7 +75,7 @@ ng new "$NAME" \
     for patch in patches/*.patch; do
         patch -p0 < "$patch" || true
     done
-    yarn install
+    npm install
 )
 progress "Generating Manifest"
 if [ -f "manifest.json" ]; then
@@ -101,9 +98,16 @@ cat > manifest.json <<-EOF
             }
         }
     ],
-    "nodeVersion": "12"
+    "nodeVersion": "22"
 }
 EOF
+
+progress "Update CI"
+if [ -f "../../bitbucket-pipelines.yml" ]; then
+    sed -i "s/spartacus/$NAME/g" ../../bitbucket-pipelines.yml
+else
+    warning "bitbucket-pipelines.yml not found; skipping update"
+fi
 progress "FINISHED"
 echo "Next steps:"
 echo "- Update the baseSite.context with the correct baseSite, currency etc."

@@ -1,37 +1,39 @@
-# Folders to ignore, whatever the place they are
-.DS_Store
-.metadata
-classes
-testclasses
-eclipsebin
-gensrc
-
-# Folders to ignore at the root of the repository
-hybris/roles/
-hybris/log/
-hybris/temp/
-hybris/data/
-hybris/config/local-config/99-local.properties
-
-# only allow custom extension
-hybris/bin/*
-!hybris/bin/custom/
-
-#IDE files
-.gradle
-.idea
-idea-module-files
-*.iml
+# IDEs and editors
+.project
+.classpath
+*.launch
+.settings/
 com.springsource.sts.config.flow.prefs
 org.sonar.ide.eclipse.core.prefs
 HybrisCodeGeneration.launch
-
 org.springframework.ide.eclipse.beans.core.prefs
 org.springframework.ide.eclipse.core.prefs
 .springBeans
 
-# Filename patterns to ignore
-lib/.lastupdate
+# ignore temporary folders
+hybris/roles/
+hybris/log/
+hybris/temp/
+hybris/data/
+
+# ignore developer specific configuration
+hybris/config/local.properties
+hybris/config/local-config/[8-9][0-9]-local.properties
+hybris/config/licence/installedSaplicenses.properties
+hybris/config/solr/instances/default/configsets
+
+# ignore platform and module extension
+hybris/bin/platform/
+hybris/bin/modules/
+
+# ignore lib folders in custom extension
+hybris/bin/custom/**/lib
+
+# ignore compiled and generated output
+classes
+testclasses
+eclipsebin
+gensrc
 *.class
 build.xml
 Generated*.java
@@ -46,9 +48,12 @@ ruleset.xml
 *.log
 .pmd
 *build.number
-
 base.properties
-#  Addon specific copy folders
+*_bof.jar
+/build/
+/cloud-extension-pack/
+
+# ignore addon specific copy folders
 **/_ui/addons
 **/views/addons
 **/tld/addons
@@ -61,17 +66,3 @@ base.properties
 **/web/commonwebsrc/*/
 **/web/webroot/WEB-INF/lib/addon-*
 wro_addons.xml
-
-# Backoffice artifacts
-*_bof.jar
-
-# project ignore
-/build/
-/dependencies/
-/cloud-extension-pack/
-gradle.properties
-hybris/config/local.properties
-hybris/config/solr/instances/default/configsets
-
-# developer-specific properties
-hybris/config/local-config/99-local.properties

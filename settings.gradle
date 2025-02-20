@@ -1,0 +1,3 @@
+rootProject.name = 'SAP CCv2 Project'
+
+include 'core-customize'
