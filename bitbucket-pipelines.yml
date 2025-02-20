@@ -1,0 +1,246 @@
+definitions:
+  images:
+    backendimage: &hybris-build-image
+      name: sapmachine:17
+    frontendimage: &frontend-build-image
+      name: node:20-alpine
+    deployimage: &hybris-deployment-image
+      name: atlassian/default-image:4
+  caches:
+    jsnode:
+      key:
+        files:
+          - "js-storefront/spartacus/package-lock.json"
+          - "js-storefront/spartacus/yarn.lock"
+      path: js-storefront/spartacus/node_modules
+    gradlewrapper: ~/.gradle/wrapper
+    sapccm:
+      path: sapccm/
+  buildEnv: &buildEnv alias Step='echo'
+  steps:
+    - ccv2build: &ccv2-build
+        name: Trigger CCv2 Build
+        image: *hybris-deployment-image
+        runs-on: self.hosted
+        caches:
+          - sapccm
+        clone:
+          enabled: false
+        script:
+          - |
+            if [ ! -d "./sapccm" ];
+              wget --http-user "${ARINEO_REGISTRY_USER}" --http-password "${ARINEO_REGISTRY_PASSWORD}" -L https://nexus.ebusiness.arineo-service.com/repository/sap-other-packages/sapccm/CXCOMMCLI00P_21-80005133.ZIP
+              mkdir -p sapccm
+              unzip CXCOMMCLI00P_21-80005133.ZIP -d sapccm
+            fi
+            export PATH=$PATH:$(pwd)/sapccm/bin
+          - if [ -n "${build_code}" ]; then exit 0; fi
+          - sapccm config set auth-credentials ${CCV2_AUTH_TOKEN}
+          - sapccm config set subscription-code ${CCV2_SUBSCRIPTION_CODE}
+          - export build_name="automated_$(date +'%Y%m%d')-CI-${BITBUCKET_BUILD_NUMBER}"
+          - sapccm build create --timeout=30 --branch=${BITBUCKET_BRANCH} --name=${build_name}
+          - |
+            Step Cleanup old build
+            results=$(sapccm build list --status-not=UNKNOWN,BUILDING,DELETED | tail -n+2 | awk '{print $1, $2, $9}' | grep "automated_" | sort -k3)
+            if [ -z "$results" ]; then
+              echo "No builds found. Nothing to do."
+              exit 0
+            fi
+            if [[ $(echo "$results" | wc -l) -ge ${KEEP_LAST_N_BUILDS:7} ]]; then
+              to_delete=$(echo "$results" | head -n1 | cut -d ' ' -f1)
+              status=$(sapccm build delete --build-code=${to_delete})
+              if [[ $status == *"was marked to be deleted" ]]; then
+                echo "[WARN] Couldn't remove old build cause: ${status}"
+              fi
+            fi
+            if [ $(sapccm build list | head -n 2 | tail -1 | tr -s ' ' | cut -d ' ' -f 4) = "FAIL" ]
+            then
+              echo "Build Failed"
+              exit 1
+            fi
+
+    - ccv2deploy: &ccv2-deploy
+        name: Trigger CCv2 Deployment
+        image: *hybris-deployment-image
+        runs-on: self.hosted
+        caches:
+          - sapccm
+        clone:
+          enabled: false
+        script:
+          - |
+            if [ ! -d "./sapccm" ];
+              wget --http-user "${ARINEO_REGISTRY_USER}" --http-password "${ARINEO_REGISTRY_PASSWORD}" -L https://nexus.ebusiness.arineo-service.com/repository/sap-other-packages/sapccm/CXCOMMCLI00P_21-80005133.ZIP
+              mkdir -p sapccm
+              unzip CXCOMMCLI00P_21-80005133.ZIP -d sapccm
+            fi
+            export PATH=$PATH:$(pwd)/sapccm/bin
+            sapccm config set auth-credentials ${CCV2_AUTH_TOKEN}
+            if [ -z "${strategy}" ]; then export strategy=RECREATE; fi
+            if [ -z "${database_update_mode}" ]; then export database_update_mode=INITIALIZE; fi
+            if [ -z "${build_code}" ]; then export build_code=$(sapccm build list --subscription-code=${CCV2_SUBSCRIPTION_CODE} | head -n 2 | tail -1 | cut -d ' ' -f 1); fi
+
+            status=$(sapccm build list --subscription-code=${CCV2_SUBSCRIPTION_CODE} | grep '${build_code}' | head -n 1 | tr -s ' ' | cut -d ' ' -f 4)
+            if [ $status != "SUCCESS" ]; then
+              echo "Deployment not created: Last build with code ${build_code} was not successful!"
+              exit 1
+            else
+              sapccm deployment create --no-wait --subscription-code=${CCV2_SUBSCRIPTION_CODE} --build-code=${build_code} --environment-code=${CCV2_ENVIRONMENT_CODE} --strategy=${strategy} --database-update-mode=${database_update_mode}
+              echo "Deployment created, view: https://portal.commerce.ondemand.com/subscription/${CCV2_SUBSCRIPTION_CODE}/applications/commerce-cloud/builds/${build_code}/deployments"
+            fi
+
+    - localbackendcodeformatter: &local-backend-codeformatter
+        name: Verify Code Formatting on Hybris
+        image: *hybris-build-image
+        caches:
+          - gradle
+          - gradlewrapper
+        clone:
+          enabled: true
+          depth: full
+        script:
+          - *buildEnv
+          - |
+            Step "Verify Code Formatting Setting"
+            ./gradlew spotlessJavaCheck
+    - localbackendbuildandtest: &local-backend-build
+        name: Build & Test Hybris
+        image: *hybris-build-image
+        caches:
+          - gradle
+          - gradlewrapper
+        clone:
+          enabled: true
+          depth: full
+        script:
+          - *buildEnv
+          - |
+            Step "Setup SAP Commerce Suite Version"
+            ./gradlew setupLocalDevelopment -P"sUser=${ARINEO_REGISTRY_USER}" -P"sUserPass=${ARINEO_REGISTRY_PASSWORD}"
+            export HYBRIS_OPT_CONFIG_DIR=${BITBUCKET_CLONE_DIR}/core-customize/hybris/config/local-config
+          - |
+            Step "Build project"
+            ./gradlew ycustomize yall
+          - |
+            Step "Run unit tests"
+            cp -f ${BITBUCKET_CLONE_DIR}/ci/config/testing-unit.properties ${BITBUCKET_CLONE_DIR}/core-customize/hybris/config/local-config/99-local.properties
+            ./gradlew yunittests
+            for file in ${BITBUCKET_CLONE_DIR}/junit/test-results/unit/*.xml; do if [ "$(grep -cE '<(error|failure)' "${file}")" -gt 0 ]; then exit 1; fi; done
+            if [ ! -f "${BITBUCKET_CLONE_DIR}/junit/jacoco-unit.exec" ]; then
+              mkdir -p "${BITBUCKET_CLONE_DIR}/junit"
+              touch "${BITBUCKET_CLONE_DIR}/junit/jacoco-unit.exec"
+            fi
+          - |
+            Step "Run integration tests"
+            cp -f ${BITBUCKET_CLONE_DIR}/ci/config/testing-integration.properties ${BITBUCKET_CLONE_DIR}/core-customize/hybris/config/local-config/99-local.properties
+            ./gradlew yintegrationtests
+            for file in ${BITBUCKET_CLONE_DIR}/junit/test-results/integration/*.xml; do if [ "$(grep -cE '<(error|failure)' "${file}")" -gt 0 ]; then exit 1; fi; done
+            if [ ! -f "${BITBUCKET_CLONE_DIR}/junit/jacoco-integration.exec" ]; then
+              mkdir -p "${BITBUCKET_CLONE_DIR}/junit"
+              touch "${BITBUCKET_CLONE_DIR}/junit/jacoco-integration.exec"
+            fi
+          - |
+            Step "Sonar QA Report"
+            if [ "${BITBUCKET_BRANCH}" = "${QA_REPORT_BRANCH:develop}" ]; then
+              #java -jar ${BITBUCKET_CLONE_DIR}/ci/lib/jacococli.jar merge ${BITBUCKET_CLONE_DIR}/junit/jacoco-unit.exec ${BITBUCKET_CLONE_DIR}/junit/jacoco-integration.exec --destfile ${BITBUCKET_CLONE_DIR}/junit/jacoco.exec
+              java -jar ${BITBUCKET_CLONE_DIR}/ci/lib/jacococli.jar report ${BITBUCKET_CLONE_DIR}/junit/jacoco-unit.exec --classfiles ${BITBUCKET_CLONE_DIR}/core-customize/hybris/bin/custom --sourcefiles ${BITBUCKET_CLONE_DIR}/core-customize/hybris/bin/custom --xml ${BITBUCKET_CLONE_DIR}/junit/jacoco.xml
+              cd ${BITBUCKET_CLONE_DIR}/core-customize/hybris/bin/platform
+              source setantenv.sh
+              export PATH="$(find core-customize/hybris/bin/modules/npm-ancillary/npmancillary/resources/npm/node -name node -type f -path '*linux*/bin/*'):$PATH"
+              ant -propertyfile ${BITBUCKET_CLONE_DIR}/ci/config/sonar.properties sonarcheck -Dsonar.login "${SONARQUBE_TOKEN}" -Dsonar.projectVersion="${VERSION_UNDER_DEVELOPMENT}"
+            else
+              echo "Skipping Sonar QA report for branch ${BITBUCKET_BRANCH}. QA report only available on ${QA_REPORT_BRANCH:develop} branch."
+            fi
+    - localfrontendcodeformatter: &local-frontend-codeformatter
+        name: Verify Code Formatting on Angular Frontend
+        image: *frontend-build-image
+        caches:
+          - gradle
+          - gradlewrapper
+        clone:
+          enabled: true
+          depth: full
+        script:
+          - *buildEnv
+          - |
+            Step "Verify Code Formatting Setting"
+            apk add --no-cache openjdk17-jre
+            ./gradlew spotlessFrontendCheck
+    - localfrontendbuildandtest: &local-frontend-build
+        name: Build & Test Angular Frontend
+        image: *frontend-build-image
+        caches:
+          - jsnode
+        clone:
+          enabled: true
+          depth: full
+        script:
+          - *buildEnv
+          - |
+            Step "Build project"
+            cd js-storefront/spartacus
+            npm ci
+            npm build
+          - |
+            Step "QA Report"
+            if [ "${BITBUCKET_BRANCH}" = "${QA_REPORT_BRANCH:develop}" ]; then
+              apk add --no-cache openjdk17-jre
+              npx --yes sonar-scanner -Dsonar.projectBaseDir=${BITBUCKET_CLONE_DIR}/js-storefront/spartacus -Dsonar.projectKey=spartacus-storefront -Dsonar.host.url=https://scan.ebusiness.arineo-service.com -Dsonar.login="${ARINEO_SONARQUBE_STOREFRONT_TOKEN}" -Dsonar.projectVersion="${VERSION_UNDER_DEVELOPMENT}";
+            fi
+
+pipelines:
+  pull-requests:
+    "**":
+      - parallel:
+          - step:
+              <<: *local-backend-codeformatter
+              condition:
+                changesets:
+                  includePaths:
+                    - "core-customize/hybris/bin/custom/project/**/*.java"
+          - step:
+              <<: *local-frontend-codeformatter
+              condition:
+                changesets:
+                  includePaths:
+                    - "js-storefront/spartacus/src/**/*.scss"
+                    - "js-storefront/spartacus/src/**/*.ts"
+                    - "js-storefront/spartacus/src/**/*.html"
+      - parallel:
+          - step:
+              <<: *local-backend-build
+              condition:
+                changesets:
+                  includePaths:
+                    - "core-customize/hybris/bin/custom/project/**/*.java"
+                    - "core-customize/hybris/bin/custom/project/**/*-beans.xml"
+                    - "core-customize/hybris/bin/custom/project/**/*-items.xml"
+                    - "core-customize/hybris/bin/custom/project/**/extensioninfo.xml"
+                    - "core-customize/hybris/bin/custom/project/**/external-dependencies.xml"
+          - step:
+              <<: *local-frontend-build
+              condition:
+                changesets:
+                  includePaths:
+                    - "js-storefront/spartacus/**/*.json"
+                    - "js-storefront/spartacus/src/**/*.scss"
+                    - "js-storefront/spartacus/src/**/*.ts"
+                    - "js-storefront/spartacus/src/**/*.html"
+  custom:
+    build-all:
+      - parallel:
+          - step:
+              <<: *local-backend-build
+          - step:
+              <<: *local-frontend-build
+    trigger-ccv2-build:
+      - step:
+          <<: *ccv2-build
+    trigger-dev-deployment:
+      - variables:
+          - name: strategy
+          - name: database_update_mode
+          - name: build_code
+      - step:
+          <<: *ccv2-deploy
+          deployment: test

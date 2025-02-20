@@ -1,0 +1,27 @@
+# Folders to ignore, whatever the place they are
+.DS_Store
+.metadata
+Thumbs.db
+
+# Gradle Build Artefacts
+/build/
+/dependencies
+/certificates
+.gradle
+
+# IntelliJ Setting
+.idea/
+idea-module-files
+*.iml
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history/*
+
+# Archives
+*.zip
+*.ZIP

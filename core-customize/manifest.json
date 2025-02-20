@@ -1,3 +1,114 @@
 {
-   "commerceSuiteVersion": "2011.9"
+    "commerceSuiteVersion": "2211.35",
+    "extensionPacks": [{
+        "name": "hybris-commerce-integrations",
+        "version": "2211.31"
+    }],
+    "extensions": ["modeltacceleratorservices"],
+    "properties": [],
+    "storefrontAddons": [],
+    "useCloudExtensionPack": false,
+    "aspects": [{
+            "name": "backoffice",
+            "webapps": [{
+                    "contextPath": "/hac",
+                    "name": "hac"
+                },
+                {
+                    "contextPath": "/backoffice",
+                    "name": "backoffice"
+                },
+                {
+                    "contextPath": "/authorizationserver",
+                    "name": "oauth2"
+                },
+                {
+                    "contextPath": "/medias",
+                    "name": "mediaweb"
+                }
+            ]
+        },
+        {
+            "name": "backgroundProcessing",
+            "properties": [],
+            "webapps": [{
+                    "contextPath": "/hac",
+                    "name": "hac"
+                },
+                {
+                    "contextPath": "/odata2webservices",
+                    "name": "odata2webservices"
+                }
+            ]
+        },
+        {
+            "name": "api",
+            "properties": [],
+            "webapps": [{
+                    "contextPath": "/hac",
+                    "name": "hac"
+                },
+                {
+                    "contextPath": "/occ",
+                    "name": "commercewebservices"
+                },
+                {
+                    "contextPath": "/authorizationserver",
+                    "name": "oauth2"
+                },
+                {
+                    "contextPath": "/medias",
+                    "name": "mediaweb"
+                }
+            ]
+        }
+    ],
+    "useConfig": {
+        "extensions": {
+            "exclude": [],
+            "location": "hybris/config/localextensions.xml"
+        },
+        "properties": [{
+                "location": "hybris/config/cloud/common.properties"
+            },
+            {
+                "aspect": "api",
+                "location": "hybris/config/cloud/aspect/api.properties"
+            },
+            {
+                "aspect": "backoffice",
+                "location": "hybris/config/cloud/aspect/backoffice.properties"
+            },
+            {
+                "aspect": "backgroundProcessing",
+                "location": "hybris/config/cloud/aspect/backgroundprocessing.properties"
+            },
+            {
+                "aspect": "admin",
+                "location": "hybris/config/cloud/aspect/admin.properties"
+            },
+            {
+                "location": "hybris/config/cloud/persona/development.properties",
+                "persona": "development"
+            },
+            {
+                "location": "hybris/config/cloud/persona/staging.properties",
+                "persona": "staging"
+            }
+        ],
+        "solr": {
+            "location": "solr"
+        },
+        "tests": {
+            "extensions": [
+                "mybackoffice",
+                "mycore",
+                "myfacades",
+                "myinitialdata",
+                "myocc"
+            ],
+            "annotations": ["UnitTests", "IntegrationTests"],
+            "packages": ["com.customer.project.*"]
+        }
+    }
 }

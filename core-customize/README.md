@@ -2,13 +2,13 @@
 
 > **Initial project bootstrap**
 >
-> 1. Download the latest SAP Commerce 2011 release zip file and put it into the `dependencies` folder
+> 1. Download the latest SAP Commerce 2211 release zip file and put it into the `dependencies` folder
 >    using the correct file name, e.g.
 >
 >    ```bash
->    cp ~/Downloads/CXCOMM201100P*.ZIP ./dependencies/hybris-commerce-suite-2011.6.zip
+>    cp ~/Downloads/CXCOMM221100_P00.ZIP ./dependencies/hybris-commerce-suite-2211.0.zip
 >    ```
->    *Or* configure your S-User (e.g. using `gradle.properties`) and run `./gradlew downloadAndVerifyPlatform`
+>    *Or* configure and use the CXDEV Tools environment from https://github.com/sapcxtools/environment/ (recommended)
 >    
 > 1. Bootstrap the starting point for your Commerce project by running the following command:
 >
@@ -16,7 +16,7 @@
 >    ./gradlew -b bootstrap.gradle.kts \
 >      -PprojectName=<name, e.g. coolshop> \
 >      -ProotPackage=<package, e.g. com.cool.shop> \
->      -PintExtPackVersion=2102.1    # (optional) enable "SAP Commerce Cloud, Integration Extension Pack"
+>      -PintExtPackVersion=2211.0    # (optional) enable "SAP Commerce Cloud, Integration Extension Pack"
 >    ```
 >
 >    Read the output!
